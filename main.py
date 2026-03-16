@@ -56,6 +56,12 @@ def main():
         action="store_true",
         help="Set this argument when using uncertainty. Sets loss function to Negative Log of the Expected Likelihood.",
     )
+    parser.add_argument(
+        "--prior",
+        type=float,
+        default=1.0,
+        help="Dirichlet prior weight per class (default: 1.0). Used with --uncertainty.",
+    )
     args = parser.parse_args()
 
     if args.examples:
@@ -91,13 +97,13 @@ def main():
             criterion = nn.CrossEntropyLoss()
 
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=0.005)
-
         exp_lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
         device = get_device()
         model = model.to(device)
 
-        model, metrics = train_model(
+        # Updated call — now passes prior + handles new 5-value return
+        model, losses, accuracy, evidences, _ = train_model(
             model,
             dataloaders,
             num_classes,
@@ -107,6 +113,7 @@ def main():
             num_epochs=num_epochs,
             device=device,
             uncertainty=use_uncertainty,
+            prior=args.prior,
         )
 
         state = {
@@ -115,40 +122,39 @@ def main():
             "optimizer_state_dict": optimizer.state_dict(),
         }
 
+        prior_str = f"_prior{args.prior:.1f}" if use_uncertainty else ""
         if use_uncertainty:
             if args.digamma:
-                torch.save(state, "./results/model_uncertainty_digamma.pt")
-                print("Saved: ./results/model_uncertainty_digamma.pt")
-            if args.log:
-                torch.save(state, "./results/model_uncertainty_log.pt")
-                print("Saved: ./results/model_uncertainty_log.pt")
-            if args.mse:
-                torch.save(state, "./results/model_uncertainty_mse.pt")
-                print("Saved: ./results/model_uncertainty_mse.pt")
-
+                torch.save(state, f"./results/model_uncertainty_digamma{prior_str}.pt")
+                print(f"Saved: ./results/model_uncertainty_digamma{prior_str}.pt")
+            elif args.log:
+                torch.save(state, f"./results/model_uncertainty_log{prior_str}.pt")
+                print(f"Saved: ./results/model_uncertainty_log{prior_str}.pt")
+            elif args.mse:
+                torch.save(state, f"./results/model_uncertainty_mse{prior_str}.pt")
+                print(f"Saved: ./results/model_uncertainty_mse{prior_str}.pt")
         else:
             torch.save(state, "./results/model.pt")
             print("Saved: ./results/model.pt")
 
     elif args.test:
-
         use_uncertainty = args.uncertainty
         device = get_device()
         model = LeNet()
         model = model.to(device)
         optimizer = optim.Adam(model.parameters())
 
+        prior_str = f"_prior{args.prior:.1f}" if use_uncertainty else ""
         if use_uncertainty:
             if args.digamma:
-                checkpoint = torch.load("./results/model_uncertainty_digamma.pt")
-                filename = "./results/rotate_uncertainty_digamma.jpg"
-            if args.log:
-                checkpoint = torch.load("./results/model_uncertainty_log.pt")
-                filename = "./results/rotate_uncertainty_log.jpg"
-            if args.mse:
-                checkpoint = torch.load("./results/model_uncertainty_mse.pt")
-                filename = "./results/rotate_uncertainty_mse.jpg"
-
+                checkpoint = torch.load(f"./results/model_uncertainty_digamma{prior_str}.pt")
+                filename = f"./results/rotate_uncertainty_digamma{prior_str}.jpg"
+            elif args.log:
+                checkpoint = torch.load(f"./results/model_uncertainty_log{prior_str}.pt")
+                filename = f"./results/rotate_uncertainty_log{prior_str}.jpg"
+            elif args.mse:
+                checkpoint = torch.load(f"./results/model_uncertainty_mse{prior_str}.pt")
+                filename = f"./results/rotate_uncertainty_mse{prior_str}.jpg"
         else:
             checkpoint = torch.load("./results/model.pt")
             filename = "./results/rotate.jpg"
@@ -158,12 +164,13 @@ def main():
 
         model.eval()
 
+        # Updated calls — now pass prior
         rotating_image_classification(
-            model, digit_one, filename, uncertainty=use_uncertainty
+            model, digit_one, filename, uncertainty=use_uncertainty, prior=args.prior
         )
 
-        test_single_image(model, "./data/one.jpg", uncertainty=use_uncertainty)
-        test_single_image(model, "./data/yoda.jpg", uncertainty=use_uncertainty)
+        test_single_image(model, "./data/one.jpg", uncertainty=use_uncertainty, prior=args.prior)
+        test_single_image(model, "./data/yoda.jpg", uncertainty=use_uncertainty, prior=args.prior)
 
 
 if __name__ == "__main__":
