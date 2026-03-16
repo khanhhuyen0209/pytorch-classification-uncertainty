@@ -5,7 +5,6 @@ import time
 from helpers import get_device, one_hot_embedding
 from losses import relu_evidence
 
-
 def train_model(
     model,
     dataloaders,
@@ -16,6 +15,7 @@ def train_model(
     num_epochs=25,
     device=None,
     uncertainty=False,
+    prior=1.0,          # ← NEW: your variable prior
 ):
 
     since = time.time()
@@ -28,61 +28,51 @@ def train_model(
 
     losses = {"loss": [], "phase": [], "epoch": []}
     accuracy = {"accuracy": [], "phase": [], "epoch": []}
-    evidences = {"evidence": [], "type": [], "epoch": []}
+    evidences = {"evidence": [], "type": [], "epoch": []}   # kept for your runner
 
     for epoch in range(num_epochs):
         print("Epoch {}/{}".format(epoch, num_epochs - 1))
         print("-" * 10)
 
-        # Each epoch has a training and validation phase
         for phase in ["train", "val"]:
             if phase == "train":
                 print("Training...")
-                model.train()  # Set model to training mode
+                model.train()
             else:
                 print("Validating...")
-                model.eval()  # Set model to evaluate mode
+                model.eval()
 
             running_loss = 0.0
             running_corrects = 0.0
-            correct = 0
 
-            # Iterate over data.
             for i, (inputs, labels) in enumerate(dataloaders[phase]):
 
                 inputs = inputs.to(device)
                 labels = labels.to(device)
-
-                # zero the parameter gradients
                 optimizer.zero_grad()
 
-                # forward
-                # track history if only in train
                 with torch.set_grad_enabled(phase == "train"):
 
                     if uncertainty:
-                        y = one_hot_embedding(labels, num_classes)
-                        y = y.to(device)
+                        y = one_hot_embedding(labels, num_classes).to(device)
                         outputs = model(inputs)
                         _, preds = torch.max(outputs, 1)
+
+                        # ← UPDATED: pass prior to your new loss functions
                         loss = criterion(
-                            outputs, y.float(), epoch, num_classes, 10, device
+                            outputs, y.float(), epoch, num_classes, 10, device, prior=prior
                         )
 
                         match = torch.reshape(torch.eq(preds, labels).float(), (-1, 1))
                         acc = torch.mean(match)
                         evidence = relu_evidence(outputs)
-                        alpha = evidence + 1
-                        u = num_classes / torch.sum(alpha, dim=1, keepdim=True)
+                        alpha = evidence + prior                    # ← generalized
+                        u = (num_classes * prior) / torch.sum(alpha, dim=1, keepdim=True)  # ← consistent uncertainty
 
                         total_evidence = torch.sum(evidence, 1, keepdim=True)
                         mean_evidence = torch.mean(total_evidence)
-                        mean_evidence_succ = torch.sum(
-                            torch.sum(evidence, 1, keepdim=True) * match
-                        ) / torch.sum(match + 1e-20)
-                        mean_evidence_fail = torch.sum(
-                            torch.sum(evidence, 1, keepdim=True) * (1 - match)
-                        ) / (torch.sum(torch.abs(1 - match)) + 1e-20)
+                        mean_evidence_succ = torch.sum(torch.sum(evidence, 1, keepdim=True) * match) / (torch.sum(match) + 1e-20)
+                        mean_evidence_fail = torch.sum(torch.sum(evidence, 1, keepdim=True) * (1 - match)) / (torch.sum(torch.abs(1 - match)) + 1e-20)
 
                     else:
                         outputs = model(inputs)
@@ -93,13 +83,11 @@ def train_model(
                         loss.backward()
                         optimizer.step()
 
-                # statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
 
-            if scheduler is not None:
-                if phase == "train":
-                    scheduler.step()
+            if scheduler is not None and phase == "train":
+                scheduler.step()
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
             epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
@@ -111,13 +99,8 @@ def train_model(
             accuracy["epoch"].append(epoch)
             accuracy["phase"].append(phase)
 
-            print(
-                "{} loss: {:.4f} acc: {:.4f}".format(
-                    phase.capitalize(), epoch_loss, epoch_acc
-                )
-            )
+            print("{} loss: {:.4f} acc: {:.4f}".format(phase.capitalize(), epoch_loss, epoch_acc))
 
-            # deep copy the model
             if phase == "val" and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
@@ -125,15 +108,10 @@ def train_model(
         print()
 
     time_elapsed = time.time() - since
-    print(
-        "Training complete in {:.0f}m {:.0f}s".format(
-            time_elapsed // 60, time_elapsed % 60
-        )
-    )
+    print("Training complete in {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60))
     print("Best val Acc: {:4f}".format(best_acc))
 
-    # load best model weights
     model.load_state_dict(best_model_wts)
-    metrics = (losses, accuracy)
 
-    return model, metrics
+    # ← UPDATED: return 5 values so your experiment_runner.py unpacks correctly
+    return model, losses, accuracy, evidences, None  # exp_log=None (placeholder)
