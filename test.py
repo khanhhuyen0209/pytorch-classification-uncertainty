@@ -10,7 +10,7 @@ from losses import relu_evidence
 from helpers import rotate_img, one_hot_embedding, get_device
 
 
-def test_single_image(model, img_path, uncertainty=False, device=None):
+def test_single_image(model, img_path, uncertainty=False, device=None, prior=1.0):
     img = Image.open(img_path).convert("L")
     if not device:
         device = get_device()
@@ -24,8 +24,8 @@ def test_single_image(model, img_path, uncertainty=False, device=None):
     if uncertainty:
         output = model(img_variable)
         evidence = relu_evidence(output)
-        alpha = evidence + 1
-        uncertainty = num_classes / torch.sum(alpha, dim=1, keepdim=True)
+        alpha = evidence + prior                                      # ← generalized
+        uncertainty = (num_classes * prior) / torch.sum(alpha, dim=1, keepdim=True)  # ← consistent
         _, preds = torch.max(output, 1)
         prob = alpha / torch.sum(alpha, dim=1, keepdim=True)
         output = output.flatten()
@@ -69,7 +69,7 @@ def test_single_image(model, img_path, uncertainty=False, device=None):
 
 
 def rotating_image_classification(
-    model, img, filename, uncertainty=False, threshold=0.5, device=None
+    model, img, filename, uncertainty=False, threshold=0.5, device=None, prior=1.0
 ):
     if not device:
         device = get_device()
@@ -98,8 +98,8 @@ def rotating_image_classification(
         if uncertainty:
             output = model(img_variable)
             evidence = relu_evidence(output)
-            alpha = evidence + 1
-            uncertainty = num_classes / torch.sum(alpha, dim=1, keepdim=True)
+            alpha = evidence + prior
+            uncertainty = (num_classes * prior) / torch.sum(alpha, dim=1, keepdim=True)
             _, preds = torch.max(output, 1)
             prob = alpha / torch.sum(alpha, dim=1, keepdim=True)
             output = output.flatten()
