@@ -204,8 +204,8 @@ def main():
     learning_rate = 0.001
     num_classes = 10
     
-    # Prior values to test (0.0 to 4.0 with step 0.5)
-    prior_values = [i * 0.5 for i in range(9)]
+    # Prior values to test (0.1 to 2.0 with step 0.1)
+    prior_values = [round(i * 0.1, 2) for i in range(1, 11)]   # 0.1 → 2.0 (skip 0.0 to avoid NaN in KL)
     
     # Create and run experiments
     runner = ExperimentRunner(
